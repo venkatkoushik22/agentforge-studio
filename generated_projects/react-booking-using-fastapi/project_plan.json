@@ -1,0 +1,26 @@
+{
+  "project_name": "react-booking-using-fastapi",
+  "summary": "Build a React booking platform using FastAPI and PostgreSQL with login, payments, search, and an admin dashboard",
+  "application_type": "Booking application",
+  "frontend": "React",
+  "backend": "FastAPI",
+  "database": "PostgreSQL",
+  "features": [
+    "User authentication",
+    "Role-based access control",
+    "Payment processing",
+    "Search and filtering",
+    "Analytics dashboard",
+    "REST API"
+  ],
+  "folders": [
+    "frontend",
+    "backend",
+    "tests",
+    "docs"
+  ],
+  "warnings": [
+    "Payment data must be handled through a PCI-compliant provider.",
+    "Passwords must be hashed and secrets must not be committed to Git."
+  ]
+}
