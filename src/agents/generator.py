@@ -7,26 +7,43 @@ from src.models.schemas import ProjectPlan
 
 
 def _write_file(path: Path, content: str) -> None:
+    """Create parent directories and write a UTF-8 file."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content.strip() + "\n", encoding="utf-8")
+    path.write_text(
+        content.strip() + "\n",
+        encoding="utf-8",
+    )
 
 
 def _backend_main(plan: ProjectPlan) -> str:
+    """Generate the FastAPI backend entry point."""
     return dedent(
         f'''
         from fastapi import FastAPI
+        from fastapi.middleware.cors import CORSMiddleware
 
         app = FastAPI(
-            title="{plan.project_name}",
-            description="{plan.summary}",
-            version="0.1.0",
+            title={plan.project_name!r},
+            description={plan.summary!r},
+            version="0.2.0",
+        )
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=[
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+            ],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
         )
 
 
         @app.get("/")
         def root() -> dict[str, str]:
             return {{
-                "message": "Welcome to {plan.project_name}",
+                "message": "AgentForge generated backend is running",
                 "status": "running",
             }}
 
@@ -34,34 +51,131 @@ def _backend_main(plan: ProjectPlan) -> str:
         @app.get("/health")
         def health() -> dict[str, str]:
             return {{"status": "healthy"}}
+
+
+        @app.get("/api/project")
+        def project_info() -> dict[str, object]:
+            return {{
+                "name": {plan.project_name!r},
+                "summary": {plan.summary!r},
+                "application_type": {plan.application_type!r},
+                "frontend": {plan.frontend!r},
+                "backend": {plan.backend!r},
+                "database": {plan.database!r},
+                "features": {plan.features!r},
+                "warnings": {plan.warnings!r},
+                "status": "connected",
+            }}
         '''
     )
 
 
 def _frontend_app(plan: ProjectPlan) -> str:
-    feature_data = json.dumps(plan.features, indent=2)
-
+    """Generate a React frontend connected to the FastAPI backend."""
     return dedent(
-    	f'''
-    	import React from "react";
+        '''
+        import React, { useEffect, useState } from "react";
 
-    	const features = {feature_data};
+        const API_URL = "http://127.0.0.1:8000";
 
-        function App() {{
+        function App() {
+          const [project, setProject] = useState(null);
+          const [error, setError] = useState("");
+
+          useEffect(() => {
+            const controller = new AbortController();
+
+            async function loadProject() {
+              try {
+                const response = await fetch(
+                  `${API_URL}/api/project`,
+                  {
+                    signal: controller.signal,
+                  }
+                );
+
+                if (!response.ok) {
+                  throw new Error(
+                    `Backend returned status ${response.status}`
+                  );
+                }
+
+                const data = await response.json();
+                setProject(data);
+              } catch (requestError) {
+                if (requestError.name !== "AbortError") {
+                  setError(requestError.message);
+                }
+              }
+            }
+
+            loadProject();
+
+            return () => {
+              controller.abort();
+            };
+          }, []);
+
+          if (error) {
+            return (
+              <main>
+                <h1>Backend connection failed</h1>
+                <p>{error}</p>
+                <p>
+                  Confirm that FastAPI is running on port 8000.
+                </p>
+              </main>
+            );
+          }
+
+          if (!project) {
+            return (
+              <main>
+                <h1>Loading project...</h1>
+              </main>
+            );
+          }
+
           return (
             <main>
-              <h1>{plan.project_name}</h1>
-              <p>{plan.summary}</p>
+              <p>
+                Backend status: <strong>{project.status}</strong>
+              </p>
+
+              <h1>{project.name}</h1>
+              <p>{project.summary}</p>
+
+              <h2>Technology stack</h2>
+
+              <ul>
+                <li>Frontend: {project.frontend}</li>
+                <li>Backend: {project.backend}</li>
+                <li>Database: {project.database}</li>
+                <li>Type: {project.application_type}</li>
+              </ul>
 
               <h2>Planned features</h2>
+
               <ul>
-                {{features.map((feature) => (
-                  <li key={{feature}}>{{feature}}</li>
-                ))}}
+                {project.features.map((feature) => (
+                  <li key={feature}>{feature}</li>
+                ))}
               </ul>
+
+              {project.warnings.length > 0 && (
+                <>
+                  <h2>Security notes</h2>
+
+                  <ul>
+                    {project.warnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
             </main>
           );
-        }}
+        }
 
         export default App;
         '''
@@ -69,6 +183,7 @@ def _frontend_app(plan: ProjectPlan) -> str:
 
 
 def _readme(plan: ProjectPlan) -> str:
+    """Generate the README for the generated project."""
     features = "\n".join(
         f"- {feature}" for feature in plan.features
     )
@@ -109,8 +224,9 @@ def _readme(plan: ProjectPlan) -> str:
 
         ```bash
         cd backend
-        pip install -r requirements.txt
-        uvicorn app.main:app --reload
+        python -m venv .venv
+        .venv\\Scripts\\python.exe -m pip install -r requirements.txt
+        .venv\\Scripts\\python.exe -m uvicorn app.main:app --reload
         ```
 
         ## Run the frontend
@@ -129,6 +245,7 @@ def generate_project(
     output_root: Path | str = "generated_projects",
     overwrite: bool = False,
 ) -> Path:
+    """Generate a runnable FastAPI and React project scaffold."""
     output_root = Path(output_root)
     project_directory = output_root / plan.project_name
 
@@ -146,6 +263,21 @@ def generate_project(
         exist_ok=True,
     )
 
+    generated_files = [
+        "README.md",
+        "project_plan.json",
+        "manifest.json",
+        "backend/app/__init__.py",
+        "backend/app/main.py",
+        "backend/requirements.txt",
+        "backend/.env.example",
+        "frontend/package.json",
+        "frontend/index.html",
+        "frontend/src/main.jsx",
+        "frontend/src/App.jsx",
+        ".gitignore",
+    ]
+
     _write_file(
         project_directory / "project_plan.json",
         json.dumps(
@@ -159,11 +291,12 @@ def generate_project(
         json.dumps(
             {
                 "generator": "AgentForge Studio",
-                "version": "0.1.0",
+                "version": "0.2.0",
                 "project_name": plan.project_name,
                 "frontend": plan.frontend,
                 "backend": plan.backend,
                 "database": plan.database,
+                "generated_files": generated_files,
             },
             indent=2,
         ),
@@ -194,16 +327,22 @@ def generate_project(
         project_directory
         / "backend"
         / "requirements.txt",
-        "fastapi>=0.115.0\n"
-        "uvicorn[standard]>=0.30.0",
+        dedent(
+            '''
+            fastapi>=0.115.0
+            uvicorn[standard]>=0.30.0
+            '''
+        ),
     )
 
     _write_file(
         project_directory
         / "backend"
         / ".env.example",
-        f"APP_NAME={plan.project_name}\n"
-        "DATABASE_URL=sqlite:///./app.db",
+        (
+            f"APP_NAME={plan.project_name}\n"
+            "DATABASE_URL=sqlite:///./app.db\n"
+        ),
     )
 
     _write_file(
@@ -214,7 +353,7 @@ def generate_project(
             {
                 "name": f"{plan.project_name}-frontend",
                 "private": True,
-                "version": "0.1.0",
+                "version": "0.2.0",
                 "type": "module",
                 "scripts": {
                     "dev": "vite",
@@ -249,8 +388,10 @@ def generate_project(
                 />
                 <title>AgentForge Application</title>
               </head>
+
               <body>
                 <div id="root"></div>
+
                 <script
                   type="module"
                   src="/src/main.jsx"
@@ -296,11 +437,13 @@ def generate_project(
         dedent(
             '''
             .env
+            .env.local
             *.db
             *.sqlite
             *.sqlite3
             __pycache__/
             *.py[cod]
+            .venv/
             node_modules/
             dist/
             '''
