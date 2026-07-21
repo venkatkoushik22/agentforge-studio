@@ -1,1 +1,2 @@
 # AgentForge Studio MVP currently uses only the Python standard library.
+langgraph==1.2.9
