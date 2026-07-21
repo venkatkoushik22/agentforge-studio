@@ -4,10 +4,11 @@ from pathlib import Path
 
 from src.agents.generator import generate_project
 from src.agents.planner import plan_project
+from src.security.scanner import write_report
 
 
 def save_plan(project_name: str, plan_data: dict) -> Path:
-    """Save only the generated JSON plan."""
+    """Save only the generated JSON project plan."""
     project_directory = Path("generated_projects") / project_name
     project_directory.mkdir(parents=True, exist_ok=True)
 
@@ -18,6 +19,35 @@ def save_plan(project_name: str, plan_data: dict) -> Path:
     )
 
     return output_file
+
+
+def run_security_scan(project_directory: Path) -> dict:
+    """Run the security scanner and return its JSON report."""
+    report_path = write_report(project_directory)
+
+    report = json.loads(
+        report_path.read_text(encoding="utf-8")
+    )
+
+    print("\nSecurity scan summary")
+    print("---------------------")
+    print(f"Status: {report['status']}")
+    print(f"Total findings: {report['total_findings']}")
+    print(
+        "Critical: "
+        f"{report['severity_counts']['CRITICAL']}"
+    )
+    print(
+        "High: "
+        f"{report['severity_counts']['HIGH']}"
+    )
+    print(
+        "Medium: "
+        f"{report['severity_counts']['MEDIUM']}"
+    )
+    print(f"Report: {report_path}")
+
+    return report
 
 
 def main() -> None:
@@ -49,6 +79,12 @@ def main() -> None:
         help="Replace an existing generated project.",
     )
 
+    parser.add_argument(
+        "--skip-security-scan",
+        action="store_true",
+        help="Generate without running the security scanner.",
+    )
+
     args = parser.parse_args()
 
     requirement = args.requirement
@@ -74,8 +110,17 @@ def main() -> None:
             )
         except FileExistsError as error:
             parser.error(str(error))
+        except PermissionError:
+            parser.error(
+                "The generated project is being used by another "
+                "process. Stop Vite, Node, FastAPI, and close any "
+                "editor or terminal opened inside that folder."
+            )
 
         print(f"\nProject generated at: {project_directory}")
+
+        if not args.skip_security_scan:
+            run_security_scan(project_directory)
 
     elif args.save:
         output_file = save_plan(
