@@ -19,28 +19,22 @@ class WorkflowTests(unittest.TestCase):
                 minimum_score=90,
             )
 
-            self.assertEqual(
-                result["status"],
-                "passed",
-            )
-
+            self.assertEqual(result["status"], "passed")
             self.assertTrue(
                 result["project_directory"].exists()
             )
-
             self.assertEqual(
                 result["security_report"]["status"],
                 "passed",
             )
-
             self.assertEqual(
-                result["evaluation_report"][
-                    "overall_score"
-                ],
+                result["evaluation_report"]["overall_score"],
                 100.0,
             )
 
-    def test_quality_gate_can_fail(self) -> None:
+    def test_quality_gate_fails_without_security_report(
+        self,
+    ) -> None:
         requirement = (
             "Build a React inventory application "
             "using FastAPI."
@@ -54,21 +48,22 @@ class WorkflowTests(unittest.TestCase):
                 minimum_score=90,
             )
 
-            self.assertEqual(
-                result["status"],
-                "failed",
-            )
-
+            self.assertEqual(result["status"], "failed")
             self.assertLess(
-                result["evaluation_report"][
-                    "overall_score"
-                ],
+                result["evaluation_report"]["overall_score"],
                 90,
             )
 
     def test_rejects_empty_requirement(self) -> None:
         with self.assertRaises(ValueError):
             run_workflow("   ")
+
+    def test_rejects_invalid_minimum_score(self) -> None:
+        with self.assertRaises(ValueError):
+            run_workflow(
+                "Build a task manager.",
+                minimum_score=101,
+            )
 
 
 if __name__ == "__main__":
