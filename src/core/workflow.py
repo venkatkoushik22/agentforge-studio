@@ -11,6 +11,9 @@ from src.models.schemas import ProjectPlan
 from src.security.scanner import write_report
 
 
+PlannerType = Literal["heuristic", "llm"]
+
+
 class WorkflowState(TypedDict, total=False):
     requirement: str
     output_root: str | Path
@@ -19,6 +22,10 @@ class WorkflowState(TypedDict, total=False):
     skip_evaluation: bool
     minimum_score: float
 
+    planner: PlannerType
+    llm_model: str | None
+    planner_used: str
+
     plan: ProjectPlan
     project_directory: Path
     security_report: dict[str, Any] | None
@@ -26,24 +33,53 @@ class WorkflowState(TypedDict, total=False):
     status: str
 
 
-def _load_json(report_path: Path) -> dict[str, Any]:
-    """Load a generated JSON report."""
+def _load_json(path: Path) -> dict[str, Any]:
+    """Load a JSON report from disk."""
     return json.loads(
-        report_path.read_text(encoding="utf-8")
+        path.read_text(encoding="utf-8")
     )
 
 
-def plan_node(state: WorkflowState) -> WorkflowState:
-    """Convert the requirement into a structured project plan."""
-    plan = plan_project(state["requirement"])
+def plan_node(
+    state: WorkflowState,
+) -> WorkflowState:
+    """Create a plan using the selected planning method."""
+    planner = state.get(
+        "planner",
+        "heuristic",
+    )
+
+    if planner == "llm":
+        try:
+            from src.agents.llm_planner import (
+                plan_project_with_llm,
+            )
+        except ImportError as error:
+            raise RuntimeError(
+                "LLM planning dependencies are not installed. "
+                "Run: py -m pip install -r "
+                "requirements-llm.txt"
+            ) from error
+
+        plan = plan_project_with_llm(
+            state["requirement"],
+            model=state.get("llm_model"),
+        )
+    else:
+        plan = plan_project(
+            state["requirement"]
+        )
 
     return {
         "plan": plan,
+        "planner_used": planner,
         "status": "planned",
     }
 
 
-def generate_node(state: WorkflowState) -> WorkflowState:
+def generate_node(
+    state: WorkflowState,
+) -> WorkflowState:
     """Generate the full-stack project scaffold."""
     project_directory = generate_project(
         state["plan"],
@@ -51,7 +87,10 @@ def generate_node(state: WorkflowState) -> WorkflowState:
             "output_root",
             "generated_projects",
         ),
-        overwrite=state.get("overwrite", False),
+        overwrite=state.get(
+            "overwrite",
+            False,
+        ),
     )
 
     return {
@@ -60,9 +99,14 @@ def generate_node(state: WorkflowState) -> WorkflowState:
     }
 
 
-def security_node(state: WorkflowState) -> WorkflowState:
-    """Run the security scanner unless explicitly skipped."""
-    if state.get("skip_security_scan", False):
+def security_node(
+    state: WorkflowState,
+) -> WorkflowState:
+    """Run the generated-code security scanner."""
+    if state.get(
+        "skip_security_scan",
+        False,
+    ):
         return {
             "security_report": None,
             "status": "security_scan_skipped",
@@ -73,14 +117,21 @@ def security_node(state: WorkflowState) -> WorkflowState:
     )
 
     return {
-        "security_report": _load_json(report_path),
+        "security_report": _load_json(
+            report_path
+        ),
         "status": "security_scanned",
     }
 
 
-def evaluation_node(state: WorkflowState) -> WorkflowState:
+def evaluation_node(
+    state: WorkflowState,
+) -> WorkflowState:
     """Evaluate the generated project's quality."""
-    if state.get("skip_evaluation", False):
+    if state.get(
+        "skip_evaluation",
+        False,
+    ):
         return {
             "evaluation_report": None,
             "status": "evaluation_skipped",
@@ -91,7 +142,9 @@ def evaluation_node(state: WorkflowState) -> WorkflowState:
     )
 
     return {
-        "evaluation_report": _load_json(report_path),
+        "evaluation_report": _load_json(
+            report_path
+        ),
         "status": "evaluated",
     }
 
@@ -99,21 +152,32 @@ def evaluation_node(state: WorkflowState) -> WorkflowState:
 def route_quality_gate(
     state: WorkflowState,
 ) -> Literal["passed", "failed"]:
-    """Route the workflow based on its evaluation score."""
-    if state.get("skip_evaluation", False):
+    """Route based on the generated project's score."""
+    if state.get(
+        "skip_evaluation",
+        False,
+    ):
         return "passed"
 
-    evaluation = state.get("evaluation_report")
+    evaluation = state.get(
+        "evaluation_report"
+    )
 
     if evaluation is None:
         return "failed"
 
     score = float(
-        evaluation.get("overall_score", 0)
+        evaluation.get(
+            "overall_score",
+            0,
+        )
     )
 
     minimum_score = float(
-        state.get("minimum_score", 80.0)
+        state.get(
+            "minimum_score",
+            80.0,
+        )
     )
 
     if score >= minimum_score:
@@ -132,25 +196,65 @@ def success_node(
 def failure_node(
     state: WorkflowState,
 ) -> WorkflowState:
-    """Mark the workflow as failed."""
+    """Mark the workflow as unsuccessful."""
     return {"status": "failed"}
 
 
 def build_workflow():
-    """Build and compile the AgentForge workflow."""
-    builder = StateGraph(WorkflowState)
+    """Build and compile the AgentForge graph."""
+    builder = StateGraph(
+        WorkflowState
+    )
 
-    builder.add_node("plan", plan_node)
-    builder.add_node("generate", generate_node)
-    builder.add_node("security", security_node)
-    builder.add_node("evaluate", evaluation_node)
-    builder.add_node("success", success_node)
-    builder.add_node("failure", failure_node)
+    builder.add_node(
+        "plan",
+        plan_node,
+    )
 
-    builder.add_edge(START, "plan")
-    builder.add_edge("plan", "generate")
-    builder.add_edge("generate", "security")
-    builder.add_edge("security", "evaluate")
+    builder.add_node(
+        "generate",
+        generate_node,
+    )
+
+    builder.add_node(
+        "security",
+        security_node,
+    )
+
+    builder.add_node(
+        "evaluate",
+        evaluation_node,
+    )
+
+    builder.add_node(
+        "success",
+        success_node,
+    )
+
+    builder.add_node(
+        "failure",
+        failure_node,
+    )
+
+    builder.add_edge(
+        START,
+        "plan",
+    )
+
+    builder.add_edge(
+        "plan",
+        "generate",
+    )
+
+    builder.add_edge(
+        "generate",
+        "security",
+    )
+
+    builder.add_edge(
+        "security",
+        "evaluate",
+    )
 
     builder.add_conditional_edges(
         "evaluate",
@@ -161,8 +265,15 @@ def build_workflow():
         },
     )
 
-    builder.add_edge("success", END)
-    builder.add_edge("failure", END)
+    builder.add_edge(
+        "success",
+        END,
+    )
+
+    builder.add_edge(
+        "failure",
+        END,
+    )
 
     return builder.compile()
 
@@ -178,9 +289,13 @@ def run_workflow(
     skip_security_scan: bool = False,
     skip_evaluation: bool = False,
     minimum_score: float = 80.0,
+    planner: PlannerType = "heuristic",
+    llm_model: str | None = None,
 ) -> WorkflowState:
-    """Run the complete AgentForge generation workflow."""
-    if not requirement.strip():
+    """Run the complete AgentForge workflow."""
+    requirement = requirement.strip()
+
+    if not requirement:
         raise ValueError(
             "Project requirement cannot be empty."
         )
@@ -190,14 +305,31 @@ def run_workflow(
             "Minimum score must be between 0 and 100."
         )
 
+    if planner not in {
+        "heuristic",
+        "llm",
+    }:
+        raise ValueError(
+            "Planner must be either "
+            "'heuristic' or 'llm'."
+        )
+
     initial_state: WorkflowState = {
         "requirement": requirement,
         "output_root": output_root,
         "overwrite": overwrite,
-        "skip_security_scan": skip_security_scan,
-        "skip_evaluation": skip_evaluation,
+        "skip_security_scan": (
+            skip_security_scan
+        ),
+        "skip_evaluation": (
+            skip_evaluation
+        ),
         "minimum_score": minimum_score,
+        "planner": planner,
+        "llm_model": llm_model,
         "status": "started",
     }
 
-    return agentforge_workflow.invoke(initial_state)
+    return agentforge_workflow.invoke(
+        initial_state
+    )
