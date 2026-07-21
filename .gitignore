@@ -1,0 +1,21 @@
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Generated applications
+generated_projects/*
+!generated_projects/.gitkeep
+
+# Environment files
+.env
+.env.local
+
+# Databases and credentials
+*.db
+*.sqlite
+*.sqlite3
+*.pem
+*.key
+*.crt
