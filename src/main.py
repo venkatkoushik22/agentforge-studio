@@ -3,17 +3,15 @@ import json
 from pathlib import Path
 from typing import Any
 
-from src.agents.generator import generate_project
 from src.agents.planner import plan_project
-from src.evaluation.evaluator import write_evaluation_report
-from src.security.scanner import write_report
+from src.core.workflow import run_workflow
 
 
 def save_plan(
     project_name: str,
     plan_data: dict[str, Any],
 ) -> Path:
-    """Save only the generated JSON project plan."""
+    """Save a project plan without generating an application."""
     project_directory = (
         Path("generated_projects") / project_name
     )
@@ -35,24 +33,19 @@ def save_plan(
     return output_file
 
 
-def load_json_report(report_path: Path) -> dict[str, Any]:
-    """Load a JSON report from disk."""
-    return json.loads(
-        report_path.read_text(encoding="utf-8")
-    )
+def print_security_summary(
+    report: dict[str, Any] | None,
+) -> None:
+    """Display the security-scan result."""
+    print("\nSecurity scan")
+    print("-------------")
 
-
-def run_security_scan(
-    project_directory: Path,
-) -> dict[str, Any]:
-    """Run the security scanner and display a summary."""
-    report_path = write_report(project_directory)
-    report = load_json_report(report_path)
+    if report is None:
+        print("Status: skipped")
+        return
 
     severity_counts = report["severity_counts"]
 
-    print("\nSecurity scan")
-    print("-------------")
     print(f"Status: {report['status']}")
     print(
         f"Total findings: "
@@ -65,27 +58,21 @@ def run_security_scan(
     print(f"High: {severity_counts['HIGH']}")
     print(f"Medium: {severity_counts['MEDIUM']}")
     print(f"Low: {severity_counts['LOW']}")
-    print(f"Report: {report_path}")
-
-    return report
 
 
-def run_evaluation(
-    project_directory: Path,
-) -> dict[str, Any]:
-    """Evaluate the generated project and display a summary."""
-    report_path = write_evaluation_report(
-        project_directory
-    )
-
-    report = load_json_report(report_path)
-
+def print_evaluation_summary(
+    report: dict[str, Any] | None,
+) -> None:
+    """Display the project-quality evaluation."""
     print("\nQuality evaluation")
     print("------------------")
+
+    if report is None:
+        print("Status: skipped")
+        return
+
     print(f"Status: {report['status']}")
-    print(
-        f"Score: {report['overall_score']}%"
-    )
+    print(f"Score: {report['overall_score']}%")
     print(
         f"Checks passed: "
         f"{report['passed_checks']}/"
@@ -93,33 +80,23 @@ def run_evaluation(
     )
 
     for check in report["checks"]:
-        marker = "PASS" if check["passed"] else "FAIL"
+        marker = (
+            "PASS"
+            if check["passed"]
+            else "FAIL"
+        )
 
         print(
             f"[{marker}] {check['name']}: "
             f"{check['details']}"
         )
 
-    print(f"Report: {report_path}")
-
-    return report
-
-
-def validate_minimum_score(
-    minimum_score: float,
-) -> None:
-    """Validate the requested quality threshold."""
-    if minimum_score < 0 or minimum_score > 100:
-        raise ValueError(
-            "Minimum score must be between 0 and 100."
-        )
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Plan, generate, scan, and evaluate "
-            "full-stack application scaffolds."
+            "Plan and generate full-stack applications "
+            "through the AgentForge LangGraph workflow."
         )
     )
 
@@ -132,13 +109,16 @@ def main() -> None:
     parser.add_argument(
         "--save",
         action="store_true",
-        help="Save only the JSON project plan.",
+        help="Save only the structured project plan.",
     )
 
     parser.add_argument(
         "--generate",
         action="store_true",
-        help="Generate a FastAPI and React project.",
+        help=(
+            "Run the complete LangGraph generation "
+            "workflow."
+        ),
     )
 
     parser.add_argument(
@@ -150,13 +130,13 @@ def main() -> None:
     parser.add_argument(
         "--skip-security-scan",
         action="store_true",
-        help="Skip the generated-code security scan.",
+        help="Skip generated-code security scanning.",
     )
 
     parser.add_argument(
         "--skip-evaluation",
         action="store_true",
-        help="Skip the generated-project quality evaluation.",
+        help="Skip generated-project evaluation.",
     )
 
     parser.add_argument(
@@ -164,19 +144,12 @@ def main() -> None:
         type=float,
         default=80.0,
         help=(
-            "Minimum acceptable evaluation score. "
+            "Minimum acceptable quality score. "
             "Default: 80."
         ),
     )
 
     args = parser.parse_args()
-
-    try:
-        validate_minimum_score(
-            args.minimum_score
-        )
-    except ValueError as error:
-        parser.error(str(error))
 
     requirement = args.requirement
 
@@ -184,6 +157,65 @@ def main() -> None:
         requirement = input(
             "Describe the application you want to build: "
         )
+
+    if args.generate:
+        try:
+            result = run_workflow(
+                requirement,
+                overwrite=args.force,
+                skip_security_scan=(
+                    args.skip_security_scan
+                ),
+                skip_evaluation=(
+                    args.skip_evaluation
+                ),
+                minimum_score=args.minimum_score,
+            )
+        except (
+            ValueError,
+            FileExistsError,
+        ) as error:
+            parser.error(str(error))
+        except PermissionError:
+            parser.error(
+                "The generated folder is being used by "
+                "another process. Stop Node, Vite, "
+                "FastAPI, and close files opened inside "
+                "the generated project."
+            )
+
+        plan = result["plan"]
+
+        print("\nProject plan")
+        print("------------")
+        print(
+            json.dumps(
+                plan.to_dict(),
+                indent=2,
+            )
+        )
+
+        print(
+            f"\nProject generated at: "
+            f"{result['project_directory']}"
+        )
+
+        print_security_summary(
+            result.get("security_report")
+        )
+
+        print_evaluation_summary(
+            result.get("evaluation_report")
+        )
+
+        print("\nLangGraph workflow")
+        print("------------------")
+        print(f"Final status: {result['status']}")
+
+        if result["status"] != "passed":
+            raise SystemExit(2)
+
+        return
 
     try:
         plan = plan_project(requirement)
@@ -199,52 +231,7 @@ def main() -> None:
         )
     )
 
-    if args.generate:
-        try:
-            project_directory = generate_project(
-                plan,
-                overwrite=args.force,
-            )
-        except FileExistsError as error:
-            parser.error(str(error))
-        except PermissionError:
-            parser.error(
-                "The generated project is being used by "
-                "another process. Stop Vite, Node, FastAPI, "
-                "and close editors opened inside the folder."
-            )
-
-        print(
-            f"\nProject generated at: "
-            f"{project_directory}"
-        )
-
-        if not args.skip_security_scan:
-            run_security_scan(project_directory)
-
-        if not args.skip_evaluation:
-            evaluation = run_evaluation(
-                project_directory
-            )
-
-            score = evaluation["overall_score"]
-
-            if score < args.minimum_score:
-                print(
-                    "\nQuality gate failed: "
-                    f"{score}% is below the required "
-                    f"{args.minimum_score}%."
-                )
-
-                raise SystemExit(2)
-
-            print(
-                "\nQuality gate passed: "
-                f"{score}% meets the required "
-                f"{args.minimum_score}%."
-            )
-
-    elif args.save:
+    if args.save:
         output_file = save_plan(
             plan.project_name,
             plan_data,
