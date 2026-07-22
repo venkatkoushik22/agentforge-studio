@@ -19,6 +19,8 @@ AgentForge Studio converts natural-language product requirements into structured
 [Quality Pipeline](#quality-and-safety-pipeline) •
 [Roadmap](#roadmap)
 
+[![Hugging Face Showcase](https://img.shields.io/badge/Hugging%20Face-Live%20Showcase-FFD21E?logo=huggingface&logoColor=000)](https://huggingface.co/spaces/Venkatkoushik22/agentforge-studio)
+
 </div>
 
 ---
@@ -39,6 +41,12 @@ AgentForge Studio treats generation as only the first stage of a software-engine
 8. Configurable pass/fail quality gating
 
 The default workflow runs locally with a free heuristic planner. An OpenAI-powered structured planner is available as an optional extension.
+
+## Live Project Showcase
+
+Explore AgentForge Studio’s architecture, workflow, generated application screenshots, security reports, quality evaluation, and local setup instructions:
+
+**[Open the AgentForge Studio Showcase on Hugging Face](https://huggingface.co/spaces/Venkatkoushik22/agentforge-studio)**
 
 ---
 
