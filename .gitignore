@@ -19,3 +19,9 @@ generated_projects/*
 *.pem
 *.key
 *.crt
+
+# Accidental nested repository
+agentforge-studio/
+
+# Accidental nested repository
+agentforge-studio/
